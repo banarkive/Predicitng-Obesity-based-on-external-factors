@@ -1,0 +1,241 @@
+---
+title: "obesity"
+author: "Bhavana Sinha(2328215)"
+date: "2024-07-13"
+output: html_document
+---
+
+```{r}
+obs<- read.csv("C:\\Users\\Lenovo\\Desktop\\obesity.csv")
+head(obs,10)
+```
+```{r}
+str(obs)
+```
+```{r}
+library(psych)
+library(car)
+library(DataExplorer)
+library(dplyr)
+library(ggplot2)
+library(rpart)
+library(rpart.plot)
+library(stats)
+library(lmtest)
+library(Metrics)
+library(MASS)
+```
+
+
+```{r}
+plot_missing(obs)
+```
+
+```{r}
+#Data Preparation 
+obs$Gender <- as.factor(obs$Gender)
+obs$family_history_with_overweight <- as.factor(obs$family_history_with_overweight)
+obs$FAVC <- as.factor(obs$FAVC)
+obs$CAEC <- as.factor(obs$CAEC)
+obs$SMOKE <- as.factor(obs$SMOKE)
+obs$SCC <- as.factor(obs$SCC)
+obs$CALC <- as.factor(obs$CALC)
+obs$MTRANS <- as.factor(obs$MTRANS)
+obs$NObeyesdad <- as.factor(obs$NObeyesdad)
+```
+
+```{r}
+#Data partitioning
+set.seed(1234)
+obs_mixed<-obs[order(runif(2111)),]
+obs_training<-obs[1:1478,]
+obs_testing<-obs[1479:2111,]
+```
+
+```{r}
+#Full Model 
+model<-lm(Weight~ Gender + Age + Height + family_history_with_overweight + FAVC + FCVC + NCP + CAEC + SMOKE + CH2O + SCC + FAF + TUE + CALC + MTRANS + NObeyesdad , data= obs_training)
+
+summary(model)
+
+```
+```{r}
+# Given Residual Standard Error (RSE)
+rse <- 3.826
+
+# Calculate MSE
+mse <- rse^2
+
+# Print the MSE value
+cat("Mean Squared Error (MSE):", mse, "\n")
+```
+
+
+```{r}
+#Selecting Best Features /step wise method 
+obs_step <- stepAIC(model, direction="backward")
+```
+
+```{r}
+#Reduce Model 
+remodel <- lm(Weight ~  CH2O +  FCVC + Gender + CALC + FAF + NCP + CAEC + Height + NObeyesdad, data = obs_training)
+summary(remodel)
+
+```
+```{r}
+# Given residual standard error
+residual_standard_error <- 3.824
+
+# Degrees of freedom
+df <- 1459
+
+# Calculate the Mean Squared Error (MSE)
+mse <- (residual_standard_error^2) * (df / (df + 1))
+
+# Print the MSE value
+print(mse)
+```
+
+
+```{r}
+plot(remodel)
+```
+
+```{r}
+# Load necessary libraries
+library(tidyverse)
+library(caret)
+library(glmnet)
+library(dplyr)
+
+# Check column names
+print(names(obs))
+
+# Selecting the features and target variable
+X <- obs %>% select(-Weight, -NObeyesdad)
+y <- obs$Weight
+
+# Identify categorical and numerical columns
+categorical_cols <- names(X)[sapply(X, is.character)]
+numerical_cols <- names(X)[sapply(X, is.numeric)]
+
+# Convert categorical variables to factors
+X[categorical_cols] <- lapply(X[categorical_cols], as.factor)
+
+# Create dummy variables
+X_dummies <- model.matrix(~. - 1, data = X)
+
+# Preprocessing the numerical data (standardization)
+preprocess_params <- preProcess(X_dummies, method = c("center", "scale"))
+
+# Apply preprocessing to the entire dataset
+X_preprocessed <- predict(preprocess_params, X_dummies)
+
+# Split the data into training and test sets
+set.seed(42)
+train_index <- createDataPartition(y, p = 0.8, list = FALSE)
+X_train <- X_preprocessed[train_index, ]
+y_train <- y[train_index]
+X_test <- X_preprocessed[-train_index, ]
+y_test <- y[-train_index]
+
+# Ridge Regression
+ridge_model <- cv.glmnet(X_train, y_train, alpha = 0)
+ridge_preds <- predict(ridge_model, s = "lambda.min", newx = X_test)
+ridge_mse <- mean((y_test - ridge_preds)^2)
+
+# Lasso Regression
+lasso_model <- cv.glmnet(X_train, y_train, alpha = 1)
+lasso_preds <- predict(lasso_model, s = "lambda.min", newx = X_test)
+lasso_mse <- mean((y_test - lasso_preds)^2)
+
+print(paste("Ridge Regression MSE:", ridge_mse))
+print(paste("Lasso Regression MSE:", lasso_mse))
+
+# Extracting coefficients
+ridge_coefs <- as.numeric(coef(ridge_model, s = "lambda.min"))[-1]
+lasso_coefs <- as.numeric(coef(lasso_model, s = "lambda.min"))[-1]
+
+# Combine the coefficients into a data frame
+coef_df <- data.frame(
+  Feature = colnames(X_train),
+  Ridge_Coefficient = ridge_coefs,
+  Lasso_Coefficient = lasso_coefs
+)
+
+# Displaying the top 10 features based on absolute value of coefficients in Ridge and Lasso
+coef_df <- coef_df %>%
+  mutate(Ridge_Abs_Coef = abs(Ridge_Coefficient),
+         Lasso_Abs_Coef = abs(Lasso_Coefficient))
+
+ridge_top_features <- coef_df %>%
+  arrange(desc(Ridge_Abs_Coef)) %>%
+  head(10)
+
+lasso_top_features <- coef_df %>%
+  arrange(desc(Lasso_Abs_Coef)) %>%
+  head(10)
+
+print("Top Features Identified by Ridge Regression:")
+print(ridge_top_features)
+
+print("Top Features Identified by Lasso Regression:")
+print(lasso_top_features)
+```
+
+```{r}
+# Calculate R-squared for Ridge Regression
+ridge_r2 <- 1 - sum((y_test - ridge_preds)^2) / sum((y_test - mean(y_test))^2)
+ridge_r2
+
+# Calculate R-squared for Lasso Regression
+lasso_r2 <- 1 - sum((y_test - lasso_preds)^2) / sum((y_test - mean(y_test))^2)
+lasso_r2
+```
+
+```{r}
+# Histogram for numerical features
+obs %>%
+  select_if(is.numeric) %>%
+  gather() %>%
+  ggplot(aes(value)) +
+  geom_histogram(bins = 30) +
+  facet_wrap(~ key, scales = 'free_x') +
+  theme_minimal()
+```
+```{r}
+# Box plots for numerical features grouped by a categorical feature
+obs %>%
+  select_if(is.numeric) %>%
+  gather(key = "variable", value = "value") %>%
+  ggplot(aes(x = obs$categorical_column, y = value)) +
+  geom_boxplot() +
+  facet_wrap(~ variable, scales = "free_y") +
+  theme_minimal()
+```
+```{r}
+# Calculate the correlation matrix
+correlation_matrix <- cor(obs %>% select_if(is.numeric), use = "complete.obs")
+
+# Visualize the correlation matrix
+corrplot(correlation_matrix, method = "circle")
+```
+```{r}
+library(ggplot2)
+library(reshape2)
+
+# Melt the correlation matrix into long format
+melted_correlation_matrix <- melt(correlation_matrix)
+
+# Create a heatmap
+ggplot(data = melted_correlation_matrix, aes(x = Var1, y = Var2, fill = value)) +
+  geom_tile() +
+  scale_fill_gradient2(low = "blue", high = "red", mid = "white", midpoint = 0, limit = c(-1, 1), space = "Lab", name="Correlation") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1)) +
+  coord_fixed()
+```
+
+
+
+
